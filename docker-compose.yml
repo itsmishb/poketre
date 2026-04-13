@@ -1,0 +1,24 @@
+# ローカル開発用 PostgreSQL（本番データを置かないこと）
+# 起動: docker compose up -d
+# 接続: postgresql://poketre:poketre_dev@localhost:5432/poketre
+# 詳細: docs/development-flow.md
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: poketre
+      POSTGRES_PASSWORD: poketre_dev
+      POSTGRES_DB: poketre
+    volumes:
+      - poketre_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poketre -d poketre"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  poketre_pg_data:
