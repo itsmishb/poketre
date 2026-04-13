@@ -1,0 +1,121 @@
+@import "tw-animate-css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ───────────────────────────────────────────
+       メインパレット（HSL）
+       brand-600 #2445ec → hsl(232, 84%, 53%)
+       surface   #f8f7f4 → hsl(40,  27%, 96%)
+    ─────────────────────────────────────────── */
+    --background:           40 27% 96%;    /* warm off-white */
+    --foreground:           240 10% 4%;
+
+    --card:                 0 0% 100%;
+    --card-foreground:      240 10% 4%;
+
+    --popover:              0 0% 100%;
+    --popover-foreground:   240 10% 4%;
+
+    --primary:              232 84% 53%;   /* brand-600 */
+    --primary-foreground:   0 0% 100%;
+
+    --secondary:            240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+
+    --muted:                240 5% 96%;
+    --muted-foreground:     240 4% 46%;
+
+    --accent:               232 60% 95%;   /* brand-50 */
+    --accent-foreground:    232 84% 40%;
+
+    --destructive:          0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border:               240 6% 90%;
+    --input:                240 6% 90%;
+    --ring:                 232 84% 53%;   /* brand-600 */
+
+    --radius:               0.5rem;
+
+    /* ── チャート（brand グラデーション） ── */
+    --chart-1: 232 84% 53%;
+    --chart-2: 232 70% 60%;
+    --chart-3: 232 55% 67%;
+    --chart-4: 232 40% 75%;
+    --chart-5: 232 25% 83%;
+
+    /* ───────────────────────────────────────────
+       サイドバー
+       brand-950 #161c52 → hsl(232, 58%, 20%)
+    ─────────────────────────────────────────── */
+    --sidebar-background:          232 58% 20%;
+    --sidebar-foreground:          220 20% 82%;
+    --sidebar-primary:             232 83% 63%;
+    --sidebar-primary-foreground:  0   0% 100%;
+    --sidebar-accent:              232 45% 27%;
+    --sidebar-accent-foreground:   220 20% 92%;
+    --sidebar-border:              232 40% 24%;
+    --sidebar-ring:                232 83% 63%;
+  }
+
+  .dark {
+    --background:           232 25% 9%;
+    --foreground:           0 0% 98%;
+
+    --card:                 232 20% 12%;
+    --card-foreground:      0 0% 98%;
+
+    --popover:              232 20% 12%;
+    --popover-foreground:   0 0% 98%;
+
+    --primary:              232 75% 63%;
+    --primary-foreground:   0 0% 100%;
+
+    --secondary:            232 20% 16%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted:                232 20% 16%;
+    --muted-foreground:     240 5% 65%;
+
+    --accent:               232 20% 16%;
+    --accent-foreground:    0 0% 98%;
+
+    --destructive:          0 63% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border:               232 20% 20%;
+    --input:                232 20% 20%;
+    --ring:                 232 75% 63%;
+
+    --chart-1: 232 75% 63%;
+    --chart-2: 232 65% 68%;
+    --chart-3: 232 55% 73%;
+    --chart-4: 232 45% 78%;
+    --chart-5: 232 35% 83%;
+
+    --sidebar-background:          232 55% 13%;
+    --sidebar-foreground:          220 20% 85%;
+    --sidebar-primary:             232 83% 63%;
+    --sidebar-primary-foreground:  0   0% 100%;
+    --sidebar-accent:              232 45% 20%;
+    --sidebar-accent-foreground:   220 20% 92%;
+    --sidebar-border:              232 40% 18%;
+    --sidebar-ring:                232 83% 63%;
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-noto-sans-jp), "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+
+  html {
+    @apply font-sans;
+  }
+}
