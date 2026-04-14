@@ -13,6 +13,24 @@ type BatchStatus = {
   completed: boolean;
 };
 
+const STORAGE_KEY = "pendingBatches";
+
+function readPendingBatches(): string[] {
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+function clearPendingBatches() {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // sessionStorage unavailable（Safari プライベートモード等）
+  }
+}
+
 /**
  * OCR バッチ処理の進捗をポーリングして表示するコンポーネント。
  *
@@ -25,19 +43,20 @@ export function BatchProgress() {
   const [progress, setProgress] = useState<BatchStatus[]>([]);
 
   useEffect(() => {
-    const saved = JSON.parse(sessionStorage.getItem("pendingBatches") ?? "[]") as string[];
+    const saved = readPendingBatches();
     if (saved.length === 0) return;
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/staging/batch-status?batch_ids=${saved.join(",")}`);
+        const params = new URLSearchParams({ batch_ids: saved.join(",") });
+        const res = await fetch(`/api/staging/batch-status?${params.toString()}`);
         if (!res.ok) return;
         const { batches } = (await res.json()) as { batches: BatchStatus[] };
         setProgress(batches);
 
         const allDone = batches.length > 0 && batches.every((b) => b.completed);
         if (allDone) {
-          sessionStorage.removeItem("pendingBatches");
+          clearPendingBatches();
           router.refresh();
         }
       } catch {
@@ -59,7 +78,7 @@ export function BatchProgress() {
   const pct = total > 0 ? Math.round((succeeded / total) * 100) : 0;
 
   return (
-    <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+    <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3" role="status" aria-live="polite">
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium text-primary">
           OCR 処理中: {succeeded}/{total} 件完了
@@ -67,9 +86,16 @@ export function BatchProgress() {
             <span className="ml-2 text-destructive text-xs">({failed} 件失敗)</span>
           )}
         </span>
-        <span className="text-xs text-muted-foreground">{pct}%</span>
+        <span className="text-xs text-muted-foreground" aria-hidden="true">{pct}%</span>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/20">
+      <div
+        className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/20"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`OCR 処理進捗 ${pct}%`}
+      >
         <div
           className="h-full rounded-full bg-primary transition-all duration-500"
           style={{ width: `${pct}%` }}

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { isDatabaseConfigured } from "@/lib/server-data";
+import { requireOperatorOrAdminUser } from "@/lib/authz";
+
+/** バッチID の期待フォーマット: batch_ + 英数字 */
+const BATCH_ID_RE = /^batch_[a-z0-9]+$/;
 
 /**
  * GET /api/staging/batch-status?batch_ids=batch_xxx,batch_yyy
@@ -29,13 +33,28 @@ export async function GET(request: Request) {
     return NextResponse.json({ batches: [] });
   }
 
+  const authz = await requireOperatorOrAdminUser();
+  if (!authz.ok) {
+    return NextResponse.json({ message: authz.message }, { status: authz.status });
+  }
+
   const { searchParams } = new URL(request.url);
   const batchIdsParam = searchParams.get("batch_ids") ?? searchParams.get("batch_id");
   if (!batchIdsParam) {
     return NextResponse.json({ error: "batch_ids required" }, { status: 400 });
   }
 
-  const batchIds = batchIdsParam.split(",").filter(Boolean).slice(0, 20);
+  // フォーマット検証付きでパース
+  const batchIds = batchIdsParam
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => BATCH_ID_RE.test(id))
+    .slice(0, 20);
+
+  if (batchIds.length === 0) {
+    return NextResponse.json({ error: "No valid batch_ids provided" }, { status: 400 });
+  }
+
   const pool = getPool();
 
   const { rows } = await pool.query<{
