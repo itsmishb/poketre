@@ -16,7 +16,7 @@ const eslintConfig = [
       ".next/**",
       "node_modules/**",
       "next-env.d.ts",
-      "lib/database.types.ts",  // Supabase 自動生成型
+      "lib/database.types.ts",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
