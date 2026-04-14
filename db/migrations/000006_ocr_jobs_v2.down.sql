@@ -1,3 +1,5 @@
+BEGIN;
+
 ALTER TABLE ocr_jobs
   DROP COLUMN IF EXISTS file_name,
   DROP COLUMN IF EXISTS input_location_code,
@@ -16,3 +18,5 @@ ALTER TABLE ocr_staging
 ALTER TABLE ocr_staging
   ADD CONSTRAINT ocr_staging_source_check
   CHECK (source IN ('PIPELINE', 'WEB_UPLOAD'));
+
+COMMIT;

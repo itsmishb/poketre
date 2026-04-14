@@ -49,9 +49,13 @@ export default function StagingImportPage() {
 
     // sessionStorage にバッチIDを保存（一覧ページのポーリングに使用）
     if (body.batch_id) {
-      const saved = JSON.parse(sessionStorage.getItem("pendingBatches") ?? "[]") as string[];
-      saved.push(body.batch_id);
-      sessionStorage.setItem("pendingBatches", JSON.stringify(saved));
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("pendingBatches") ?? "[]") as string[];
+        saved.push(body.batch_id);
+        sessionStorage.setItem("pendingBatches", JSON.stringify(saved));
+      } catch {
+        // sessionStorage 利用不可（プライベートブラウジング等）は無視
+      }
     }
 
     setMessage({

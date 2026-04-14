@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { getPool } from "@/lib/db/pool";
 import { getStorageClient } from "@/lib/gcp";
 import { runOcrPipeline } from "@/lib/ocr/pipeline";
@@ -20,13 +21,19 @@ import { runOcrPipeline } from "@/lib/ocr/pipeline";
  *   - 500: 一時エラー（Cloud Tasks が自動リトライ）
  */
 export async function POST(request: Request) {
-  // シークレット検証
-  const secret = process.env.OCR_WORKER_SHARED_SECRET?.trim();
-  if (secret) {
-    const provided = request.headers.get("x-ocr-secret");
-    if (provided !== secret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  // シークレット検証（未設定でも本番では拒否、timing-safe 比較）
+  const secret = process.env.OCR_WORKER_SHARED_SECRET?.trim() ?? "";
+  if (!secret) {
+    // シークレット未設定は設定ミスとして扱う（全リクエスト拒否）
+    console.error("[process-job] OCR_WORKER_SHARED_SECRET is not set");
+    return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+  }
+  const provided = request.headers.get("x-ocr-secret") ?? "";
+  const secretBuf   = Buffer.from(secret);
+  const providedBuf = Buffer.alloc(secretBuf.length);
+  Buffer.from(provided).copy(providedBuf);
+  if (!crypto.timingSafeEqual(secretBuf, providedBuf)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await request.json().catch(() => null);

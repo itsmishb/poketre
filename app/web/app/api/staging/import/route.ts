@@ -57,10 +57,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "画像ファイルを選択してください。" }, { status: 400 });
   }
 
+  const ALLOWED_EXTS  = new Set(["jpg", "jpeg", "png", "webp", "heic"]);
+  const ALLOWED_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic"]);
+
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) {
       return NextResponse.json(
         { message: `ファイルサイズ上限（5MB）を超えています: ${file.name}` },
+        { status: 400 }
+      );
+    }
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    if (!ALLOWED_EXTS.has(ext)) {
+      return NextResponse.json(
+        { message: `対応していないファイル形式です: ${file.name}（jpg / png / webp / heic のみ）` },
+        { status: 400 }
+      );
+    }
+    if (file.type && !ALLOWED_MIMES.has(file.type)) {
+      return NextResponse.json(
+        { message: `対応していない MIME タイプです: ${file.name}` },
         { status: 400 }
       );
     }
@@ -83,7 +99,7 @@ export async function POST(request: Request) {
   // GCS 保存 + ocr_jobs INSERT
   for (const file of files) {
     const bytes = Buffer.from(await file.arrayBuffer());
-    const ext   = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+    const ext   = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
     const objectPath = `ocr-uploads/${batchId}/${crypto.randomUUID()}.${ext}`;
 
     await bucket.file(objectPath).save(bytes, {
