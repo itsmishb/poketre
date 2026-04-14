@@ -29,13 +29,11 @@ dist/
 build/
 
 # ─── GCP / Credentials ───────────────────────────────────────────
-*.json
-!package.json
-!package-lock.json
-!components.json
-!tsconfig*.json
+# サービスアカウントキーのみ除外（設定ファイルは許可）
 service-account*.json
 gcp-key*.json
+*-credentials.json
+*-keyfile.json
 
 # ─── IDE ──────────────────────────────────────────────────────────
 .idea/
