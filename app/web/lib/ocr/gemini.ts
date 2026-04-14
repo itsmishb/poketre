@@ -1,7 +1,7 @@
 /**
  * Gemini Vision を使ったポケモンカード OCR v2
  *
- * 使用モデル: gemini-2.5-flash-preview-04-17（高精度、底部ストリップ解析強化）
+ * 使用モデル: gemini-2.5-flash（高精度、底部ストリップ解析強化）
  * VertexAI SDK (@google-cloud/vertexai) を使用。
  */
 import "server-only";
@@ -9,7 +9,7 @@ import { VertexAI } from "@google-cloud/vertexai";
 import { CARD_OCR_PROMPT } from "./prompt";
 import type { OcrCardResult } from "./schema";
 
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-preview-04-17";
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 const LOCATION = process.env.VERTEX_AI_LOCATION ?? "asia-northeast1";
 
 let vertexClient: VertexAI | null = null;
