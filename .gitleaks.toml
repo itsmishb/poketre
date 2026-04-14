@@ -1,0 +1,61 @@
+# gitleaks.toml — Poketre シークレットスキャン設定
+# https://github.com/gitleaks/gitleaks
+#
+# 使用方法:
+#   gitleaks detect          # リポジトリ全体スキャン
+#   gitleaks protect --staged  # ステージング済みのみ（pre-commit）
+
+title = "Poketre Gitleaks Config"
+
+[extend]
+# デフォルトルールセットを継承
+useDefault = true
+
+# ─── カスタムルール ───────────────────────────────────────────────────────────
+
+[[rules]]
+id          = "google-api-key"
+description = "Google API Key (AIzaSy...)"
+regex       = '''AIzaSy[0-9A-Za-z_-]{33}'''
+tags        = ["google", "api-key"]
+
+[[rules]]
+id          = "gcp-service-account-json"
+description = "GCP Service Account JSON (inline)"
+regex       = '''"type"\s*:\s*"service_account"'''
+tags        = ["google", "gcp", "service-account"]
+
+[[rules]]
+id          = "postgres-dsn"
+description = "PostgreSQL connection string with credentials"
+regex       = '''postgres(?:ql)?://[^:]+:[^@]{8,}@'''
+tags        = ["database", "postgres"]
+
+[[rules]]
+id          = "next-env-secret"
+description = "Next.js / Node environment secret assignment"
+regex       = '''(?i)(SECRET|TOKEN|PASSWORD|API_KEY)\s*=\s*["'][^"']{8,}["']'''
+tags        = ["env", "secret"]
+
+# ─── 許可リスト ───────────────────────────────────────────────────────────────
+[allowlist]
+description = "許可する値・ファイル"
+
+# ダミー値・プレースホルダー
+regexes = [
+  "REDACTED_REVOKED_API_KEY",
+  "your-anon-key",
+  "your-project\\.supabase\\.co",
+  "poketre_dev",            # ローカル開発用 Postgres パスワード
+  "your-app\\.vercel\\.app",
+  "your-project",
+]
+
+# スキャン対象外ファイル
+paths = [
+  "docs/",
+  ".env.local.example",
+  "app/web/.env.local.example",
+  "SECURITY.md",
+  "docs/management-guide.md",
+]

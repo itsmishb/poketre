@@ -2,19 +2,47 @@
 # Docker / migrate / psql が無い場合は docs/local-setup-troubleshooting.md を参照。
 # または: cd app/web && npm run db:migrate && npm run db:seed
 
-.PHONY: db-up db-down db-psql migrate-up migrate-down migrate-force seed-dev web-install web-lint web-build dev-db help migrate-up-node seed-dev-node
+.PHONY: db-up db-down db-psql migrate-up migrate-down migrate-force seed-dev \
+        web-install web-lint web-build dev-db help migrate-up-node seed-dev-node \
+        setup-hooks scan-secrets
 
 DATABASE_URL ?= postgres://poketre:poketre_dev@localhost:5432/poketre?sslmode=disable
 
 help:
-	@echo "Targets:"
+	@echo ""
+	@echo "Poketre — Makefile ターゲット一覧"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "  setup-hooks         Git フック（シークレット検出）をセットアップ"
+	@echo "  scan-secrets        gitleaks で全履歴をスキャン"
 	@echo "  db-up / db-down     Docker Compose（要 Docker Desktop 起動）"
 	@echo "  migrate-up          golang-migrate（無ければ Node にフォールバック）"
+	@echo "  migrate-down        直前のマイグレーションを1件ロールバック"
 	@echo "  seed-dev            psql（無ければ Node にフォールバック）"
 	@echo "  migrate-up-node     app/web の npm run db:migrate のみ"
 	@echo "  seed-dev-node       app/web の npm run db:seed のみ"
 	@echo "  dev-db              db-up + migrate-up + seed-dev"
-	@echo "詳細: docs/local-setup-troubleshooting.md"
+	@echo "  web-lint            ESLint 実行"
+	@echo "  web-build           Next.js ビルド"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "詳細: docs/management-guide.md"
+
+# ─── セキュリティ ────────────────────────────────────────────────────────────
+
+setup-hooks:
+	@echo "Git フック（シークレット検出）をセットアップ中..."
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
+	@if ! command -v gitleaks >/dev/null 2>&1; then \
+		echo "[warn] gitleaks が見つかりません。インストールを推奨します:"; \
+		echo "         brew install gitleaks"; \
+	else \
+		echo "  gitleaks: $$(gitleaks version)"; \
+	fi
+	@echo "セットアップ完了。次のコミットからシークレットが自動検出されます。"
+
+scan-secrets:
+	@command -v gitleaks >/dev/null || (echo "gitleaks が必要です: brew install gitleaks"; exit 1)
+	gitleaks detect --config .gitleaks.toml --redact --verbose
 
 db-up:
 	docker compose up -d

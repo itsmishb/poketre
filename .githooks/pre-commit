@@ -1,0 +1,48 @@
+#!/bin/sh
+# pre-commit — Poketre シークレット検出フック
+# セットアップ: make setup-hooks
+
+set -e
+
+# ─── gitleaks によるスキャン ─────────────────────────────────────────────────
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --config .gitleaks.toml --redact 2>&1; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║  [BLOCKED] シークレットが検出されました                      ║"
+    echo "║  コミットを中止します。                                       ║"
+    echo "║                                                               ║"
+    echo "║  対処方法:                                                    ║"
+    echo "║  1. git diff --cached で該当箇所を確認                       ║"
+    echo "║  2. シークレットを環境変数に移動                              ║"
+    echo "║  3. 誤検知の場合は docs/management-guide.md を参照           ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    exit 1
+  fi
+else
+  # gitleaks がない場合のフォールバック（基本パターンのみ）
+  echo "[warn] gitleaks が見つかりません。brew install gitleaks を推奨します。"
+  echo "       フォールバック: 基本パターンでスキャン中..."
+
+  STAGED=$(git diff --cached --unified=0)
+
+  # Google API Key
+  if echo "$STAGED" | grep -E 'AIzaSy[0-9A-Za-z_-]{33}' > /dev/null 2>&1; then
+    echo "[ERROR] Google API Key の疑いのある文字列が見つかりました。コミットを中止します。"
+    exit 1
+  fi
+
+  # AWS Access Key
+  if echo "$STAGED" | grep -E 'AKIA[0-9A-Z]{16}' > /dev/null 2>&1; then
+    echo "[ERROR] AWS Access Key の疑いのある文字列が見つかりました。コミットを中止します。"
+    exit 1
+  fi
+
+  # Postgres DSN with password
+  if echo "$STAGED" | grep -E 'postgres(ql)?://[^:]+:[^@]{8,}@' > /dev/null 2>&1; then
+    echo "[WARN] Postgres DSN が見つかりました。パスワードが含まれていないか確認してください。"
+    # warn only, do not block (dev DSN may be committed in docs)
+  fi
+fi
+
+exit 0
