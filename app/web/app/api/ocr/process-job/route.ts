@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       `INSERT INTO ocr_staging (
          stg_id, drive_file_id, file_name, image_url,
          serial_number, set_code, card_number_text, regulation_mark,
-         name_ja, rarity, card_type, hp,
+         name_ja, rarity, card_type,
          qty, status, review_status,
          input_location_code, batch_id, source,
          duplicate_status, duplicate_card_id,
@@ -106,13 +106,13 @@ export async function POST(request: Request) {
        ) VALUES (
          $1, $2, $3, $4,
          $5, $6, $7, $8,
-         $9, $10, $11, $12,
+         $9, $10, $11,
          1, '登録待ち', 'PENDING',
-         $13, $14, 'WEB_UPLOAD',
-         $15, $16,
-         'SUCCEEDED', $17, $18,
-         $19, $20, 'gemini-2.5-flash', $21,
-         $22::jsonb
+         $12, $13, 'WEB_UPLOAD',
+         $14, $15,
+         'SUCCEEDED', $16, $17,
+         $18, $19, 'gemini-2.5-flash', $20,
+         $21::jsonb
        )`,
       [
         stgId,
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
         job.file_name,
         `https://storage.googleapis.com/${job.gcs_bucket}/${encodeURI(job.gcs_object_path)}`,
         ocr.serial_number, ocr.set_code, ocr.card_number_text, ocr.regulation_mark,
-        ocr.name_ja, ocr.rarity, ocr.card_type, ocr.hp,
+        ocr.name_ja, ocr.rarity, ocr.card_type,
         job.input_location_code, job.batch_id,
         duplicateStatus, duplicateCardId,
         jobId, job.created_by,
