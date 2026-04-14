@@ -44,7 +44,7 @@ export function SalesChart({ data }: { data: SalesChartPoint[] }) {
             borderRadius: "6px",
             fontSize: 12,
           }}
-          formatter={(value: number) => [`¥${value.toLocaleString()}`, "売上"]}
+          formatter={(value) => [`¥${Number(value).toLocaleString()}`, "売上"]}
           labelStyle={{ color: "hsl(var(--muted-foreground))", marginBottom: 2 }}
         />
         <Bar

@@ -110,10 +110,6 @@ export default async function StagingListPage() {
                 row.status === "OCR失敗" || row.ocr_status === "FAILED" ? "失敗" :
                 row.status === "OCR中"   || row.ocr_status === "RUNNING" ? "実行中" :
                 "完了";
-              const ocrKey =
-                row.status === "OCR失敗" || row.ocr_status === "FAILED" ? "FAILED" :
-                row.status === "OCR中"   || row.ocr_status === "RUNNING" ? "RUNNING" :
-                "SUCCEEDED";
               const dupKey = row.duplicate_status ?? "NONE";
               const dupLabel = dupKey === "CANDIDATE" ? "候補あり" : dupKey === "RESOLVED" ? "解決済" : "なし";
 
