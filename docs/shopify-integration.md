@@ -90,14 +90,56 @@
 ## 6. 秘密情報
 
 - **Shopify Admin API access token**（`shpat_...`）は Secret Manager。
+  - 実装では `SHOPIFY_ENCRYPTION_KEY` から派生した鍵で AES-256-GCM 暗号化して `shopify_settings` に保存。
 - **Webhook 検証**: HMAC（`X-Shopify-Hmac-Sha256`）を検証してから受信処理する。
+- **必要な環境変数**:
+  - `SHOPIFY_ENCRYPTION_KEY` — 任意長の秘密文字列（SHA-256 で 32 バイトに正規化）
+  - `SHOPIFY_WORKER_SHARED_SECRET` — ワーカー endpoint 認証（未設定時は無認証）
 
 ---
 
-## 7. 仕様書との対応
+## 7. ワーカーの起動方法
+
+`POST /api/shopify/process-job` は 1 リクエスト = 1 ジョブ処理。定期的に呼び続けることでジョブを消化する。
+
+### 7.1 ローカル開発
+
+```bash
+cd app/web
+APP_URL=http://localhost:3000 \
+SHOPIFY_WORKER_SHARED_SECRET=$SHOPIFY_WORKER_SHARED_SECRET \
+POLL_INTERVAL_MS=3000 \
+npm run shopify:worker
+```
+
+`scripts/shopify-worker-loop.mjs` が 3 秒ごとに叩き、ジョブがある間は 100ms 間隔で連続処理する。
+
+### 7.2 本番 (Cloud Scheduler)
+
+Cloud Scheduler で HTTP ジョブを作成し、Cloud Run のワーカー URL を 30 秒〜1 分間隔で叩く:
+
+```
+gcloud scheduler jobs create http shopify-worker \
+  --schedule="* * * * *" \
+  --uri="https://<your-app>/api/shopify/process-job" \
+  --http-method=POST \
+  --headers="X-Shopify-Worker-Secret=$SHOPIFY_WORKER_SHARED_SECRET" \
+  --oidc-service-account-email=<sa>@<project>.iam.gserviceaccount.com
+```
+
+1分間隔でも、idle なら即 `{ idle: true }` で返るので負荷は軽微。
+
+### 7.3 代替: Cloud Tasks
+
+即時性が必要な場合は、`enqueueJob` と同時に Cloud Tasks にタスクを投入して `/api/shopify/process-job` を叩かせる（OCR 側と同パターン）。現状はポーリングで十分。
+
+---
+
+## 8. 仕様書との対応
 
 | 仕様書 | 本ドキュメント |
 |--------|----------------|
 | F14 Shopify 商品・在庫同期 | §2 |
 | F15 注文取り込み | §4 |
 | ChannelListings / ChannelProducts | `listings` + `shopify_products` |
+| ワーカー運用 | §7 |
