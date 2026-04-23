@@ -186,14 +186,13 @@ export default async function InventoryPage({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>管理単位</TableHead>
                 <TableHead>カード識別子</TableHead>
                 <TableHead>カード名</TableHead>
-                <TableHead>状態</TableHead>
-                <TableHead>棚座標</TableHead>
-                <TableHead>保管場所</TableHead>
+                <TableHead>コンディション</TableHead>
                 <TableHead className="text-right">数量</TableHead>
-                <TableHead>ステータス</TableHead>
+                <TableHead>管理単位</TableHead>
+                <TableHead>保管場所</TableHead>
+                <TableHead>在庫状態</TableHead>
                 <TableHead className="text-right">取得原価</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
@@ -201,17 +200,20 @@ export default async function InventoryPage({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell>{row.type === "UNIT" ? "1枚" : "ロット"}</TableCell>
-                  <TableCell className="font-medium">{row.serial_number}</TableCell>
-                  <TableCell>{row.name_ja}</TableCell>
-                  <TableCell>{row.condition_grade}</TableCell>
+                  <TableCell className="font-mono text-xs">{row.serial_number}</TableCell>
+                  <TableCell className="font-medium">{row.name_ja}</TableCell>
+                  <TableCell>
+                    <span className="inline-flex min-w-[2rem] justify-center rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs font-semibold text-slate-700">
+                      {row.condition_grade}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{row.qty.toLocaleString()}</TableCell>
+                  <TableCell className="text-muted-foreground">{row.type === "UNIT" ? "1枚" : "ロット"}</TableCell>
                   <TableCell className="font-mono text-xs">{row.location_code ?? "—"}</TableCell>
-                  <TableCell>{row.location_name}</TableCell>
-                  <TableCell className="text-right">{row.qty.toLocaleString()}</TableCell>
                   <TableCell>
                     <StatusBadge kind="stockStatus" value={row.status} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right tabular-nums">
                     {row.acquisition_cost != null ? `¥${row.acquisition_cost.toLocaleString()}` : "—"}
                   </TableCell>
                   <TableCell>
