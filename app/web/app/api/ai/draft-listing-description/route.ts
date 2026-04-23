@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
 import { generateListingDescriptionWithVertex, isVertexListingDraftConfigured } from "@/lib/ai/vertex-listing-draft";
 import { parseListingDescriptionBody } from "@/lib/ai/listing-description-prompt";
+import { requireOperatorOrAdminUser } from "@/lib/authz";
 
 /**
  * 出品向け紹介文の下書き（Vertex AI / Gemini）。
  * GOOGLE_CLOUD_PROJECT + VERTEX_LOCATION（または GOOGLE_CLOUD_LOCATION）が必須。
  * サーバーレスでは GCP_SERVICE_ACCOUNT_JSON にサービスアカウント JSON 全文を渡す。
- * 本番では認証・レート制限を必ず追加すること。
+ * レート制限は今後対応（issue #22）。
  */
 export async function POST(request: Request) {
+  const auth = await requireOperatorOrAdminUser();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.message }, { status: auth.status });
+  }
+
   if (!isVertexListingDraftConfigured()) {
     return NextResponse.json(
       {
