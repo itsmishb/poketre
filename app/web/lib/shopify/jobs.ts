@@ -2,7 +2,11 @@ import "server-only";
 import { getPool } from "@/lib/db/pool";
 import type { PoolClient } from "pg";
 
-export type JobType = "UPSERT_PRODUCT" | "UPDATE_INVENTORY" | "UNPUBLISH_PRODUCT";
+export type JobType =
+  | "UPSERT_PRODUCT"
+  | "UPDATE_INVENTORY"
+  | "UNPUBLISH_PRODUCT"
+  | "IMPORT_ORDERS";
 
 export type JobRow = {
   job_id: number;

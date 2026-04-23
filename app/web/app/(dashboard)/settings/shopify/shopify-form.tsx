@@ -73,6 +73,29 @@ export function ShopifyForm({ initial }: { initial: SettingsSnapshot }) {
     });
   };
 
+  const onImportOrders = async () => {
+    setMessage(null);
+    setIsSyncing(true);
+    try {
+      const res = await fetch("/api/shopify/import-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ kind: "err", text: data.error ?? "注文取込ジョブの投入に失敗しました" });
+        return;
+      }
+      setMessage({
+        kind: "ok",
+        text: `注文取込ジョブ #${data.jobId} をキューに投入しました。ワーカーが実行します。`,
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const onSyncAll = async (jobType: "UPSERT_PRODUCT" | "UPDATE_INVENTORY") => {
     setMessage(null);
     setIsSyncing(true);
@@ -254,6 +277,15 @@ export function ShopifyForm({ initial }: { initial: SettingsSnapshot }) {
             className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             在庫数のみ再同期
+          </button>
+          <button
+            type="button"
+            disabled={!snapshot.hasAccessToken || isSyncing}
+            onClick={onImportOrders}
+            className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            title="Webhook 取りこぼしの救済に使えます"
+          >
+            注文を取り込む（ポーリング）
           </button>
         </div>
         {(!snapshot.hasAccessToken || !snapshot.locationId) && (

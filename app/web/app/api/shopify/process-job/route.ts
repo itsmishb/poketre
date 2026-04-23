@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { claimNextJob, markFailed, markSucceeded } from "@/lib/shopify/jobs";
 import { upsertProduct, updateInventoryOnly, unpublishProduct } from "@/lib/shopify/sync";
+import { importOrdersSince } from "@/lib/shopify/orders-poll";
 import { ShopifyError } from "@/lib/shopify/client";
 
 /**
@@ -35,6 +36,11 @@ export async function POST(req: Request) {
         if (!job.card_id) throw new Error("card_id required for UNPUBLISH_PRODUCT");
         await unpublishProduct(job.card_id);
         break;
+      case "IMPORT_ORDERS": {
+        const sinceRaw = (job.payload as { since?: string } | null)?.since;
+        await importOrdersSince(sinceRaw ? new Date(sinceRaw) : undefined);
+        break;
+      }
       default:
         throw new Error(`Unknown job_type: ${job.job_type}`);
     }

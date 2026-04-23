@@ -89,7 +89,7 @@ async function dispatchTopic(topic: string, payload: Record<string, unknown>): P
   }
 }
 
-type ShopifyOrder = {
+export type ShopifyOrder = {
   id: number;
   name?: string;
   financial_status?: string;
@@ -106,7 +106,7 @@ type ShopifyOrder = {
   }>;
 };
 
-async function handleOrder(topic: string, payload: Record<string, unknown>): Promise<void> {
+export async function handleOrder(topic: string, payload: Record<string, unknown>): Promise<void> {
   const order = payload as ShopifyOrder;
   if (!order.id) throw new Error("order.id missing");
   const pool = getPool();
