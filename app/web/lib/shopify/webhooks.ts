@@ -84,7 +84,8 @@ async function dispatchTopic(topic: string, payload: Record<string, unknown>): P
       // Shopify 側からの在庫変動通知。現状は監査ログに留める
       return;
     default:
-      // 未対応 topic は受信のみで成功扱い
+      // 未対応 topic は受信のみで成功扱い。新 topic 対応漏れに気付くためログ。
+      console.warn(`[shopify-webhook] unhandled topic: ${topic}`);
       return;
   }
 }

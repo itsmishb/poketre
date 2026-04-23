@@ -12,20 +12,32 @@ const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 const SECRET = process.env.SHOPIFY_WORKER_SHARED_SECRET ?? "";
 const INTERVAL = Number(process.env.POLL_INTERVAL_MS ?? 3000);
 
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS ?? 30_000);
+
 let stopping = false;
-process.on("SIGINT", () => {
+const stop = (sig) => {
   stopping = true;
-  console.log("\n[shopify-worker] received SIGINT, finishing current job...");
-});
+  console.log(`\n[shopify-worker] received ${sig}, finishing current job...`);
+};
+process.on("SIGINT", () => stop("SIGINT"));
+process.on("SIGTERM", () => stop("SIGTERM"));
 
 async function tick() {
-  const res = await fetch(`${APP_URL}/api/shopify/process-job`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(SECRET ? { "x-shopify-worker-secret": SECRET } : {}),
-    },
-  });
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${APP_URL}/api/shopify/process-job`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(SECRET ? { "x-shopify-worker-secret": SECRET } : {}),
+      },
+      signal: ac.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   const body = await res.json().catch(() => ({}));
   if (body.idle) return { idle: true };
   if (!res.ok) {

@@ -30,12 +30,14 @@ export default function DashboardError({
             参照ID: {error.digest}
           </p>
         )}
-        <details className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-left text-xs">
-          <summary className="cursor-pointer text-slate-600">エラー詳細</summary>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-slate-700">
-            {error.message}
-          </pre>
-        </details>
+        {process.env.NODE_ENV !== "production" && (
+          <details className="mt-4 rounded border border-slate-200 bg-slate-50 p-3 text-left text-xs">
+            <summary className="cursor-pointer text-slate-600">エラー詳細（開発用）</summary>
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-slate-700">
+              {error.message}
+            </pre>
+          </details>
+        )}
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button
             type="button"
