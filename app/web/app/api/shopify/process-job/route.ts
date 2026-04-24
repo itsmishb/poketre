@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { claimNextJob, markFailed, markSucceeded } from "@/lib/shopify/jobs";
 import { upsertProduct, updateInventoryOnly, unpublishProduct } from "@/lib/shopify/sync";
 import { importOrdersSince } from "@/lib/shopify/orders-poll";
@@ -8,15 +9,22 @@ import { ShopifyError } from "@/lib/shopify/client";
  * POST /api/shopify/process-job
  * 1リクエスト = 1ジョブ。Cloud Tasks / Cron からポーリング呼び出し。
  *
- * Auth: SHOPIFY_WORKER_SHARED_SECRET (X-Shopify-Worker-Secret ヘッダー)
+ * Auth: SHOPIFY_WORKER_SHARED_SECRET (X-Shopify-Worker-Secret ヘッダー) 必須。
+ * env 未設定時は 503 で拒否する（無認証突破を防ぐ）。
  */
 export async function POST(req: Request) {
   const secret = process.env.SHOPIFY_WORKER_SHARED_SECRET?.trim();
-  if (secret) {
-    const provided = req.headers.get("x-shopify-worker-secret");
-    if (provided !== secret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!secret) {
+    return NextResponse.json(
+      { error: "SHOPIFY_WORKER_SHARED_SECRET is not configured" },
+      { status: 503 }
+    );
+  }
+  const provided = req.headers.get("x-shopify-worker-secret") ?? "";
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const job = await claimNextJob();

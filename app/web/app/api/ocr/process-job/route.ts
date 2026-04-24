@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { getPool } from "@/lib/db/pool";
 import { getStorageClient } from "@/lib/gcp";
 import { runOcrPipeline } from "@/lib/ocr/pipeline";
@@ -20,13 +21,19 @@ import { runOcrPipeline } from "@/lib/ocr/pipeline";
  *   - 500: 一時エラー（Cloud Tasks が自動リトライ）
  */
 export async function POST(request: Request) {
-  // シークレット検証
+  // シークレット検証（必須）。未設定時は無認証突破を防ぐため 503 で拒否。
   const secret = process.env.OCR_WORKER_SHARED_SECRET?.trim();
-  if (secret) {
-    const provided = request.headers.get("x-ocr-secret");
-    if (provided !== secret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!secret) {
+    return NextResponse.json(
+      { error: "OCR_WORKER_SHARED_SECRET is not configured" },
+      { status: 503 }
+    );
+  }
+  const provided = request.headers.get("x-ocr-secret") ?? "";
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await request.json().catch(() => null);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
 import { isDatabaseConfigured } from "@/lib/server-data";
+import { requireOperatorOrAdminUser } from "@/lib/authz";
 
 /**
  * GET /api/staging/batch-status?batch_ids=batch_xxx,batch_yyy
@@ -25,6 +26,11 @@ import { isDatabaseConfigured } from "@/lib/server-data";
  *   }
  */
 export async function GET(request: Request) {
+  const auth = await requireOperatorOrAdminUser();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.message }, { status: auth.status });
+  }
+
   if (!isDatabaseConfigured()) {
     return NextResponse.json({ batches: [] });
   }
