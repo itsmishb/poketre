@@ -2,16 +2,16 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { isDemoMode } from "@/lib/demo";
 import { getDemoCardDetail, getDemoInventory } from "@/lib/demo-data";
-import { Card } from "@/components/ui/card";
+import { calculateAgingDays } from "@/lib/inventory/aging";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { StatusBadge } from "@/components/ui/status-badge";
+  buildInventoryFilterOptions,
+  deriveSetCode,
+  filterInventoryRows,
+} from "@/lib/inventory/filters";
+import { normalizeSortDir, normalizeSortKey, sortInventoryRows } from "@/lib/inventory/sort";
+import type { InventoryFilters, InventorySortDir, InventorySortKey } from "@/lib/inventory/types";
+import { InventoryFilterToolbar } from "@/components/inventory/inventory-filter-toolbar";
+import { InventoryTable } from "@/components/inventory/inventory-table";
 import { cn } from "@/lib/utils";
 
 export const metadata = {
@@ -23,12 +23,15 @@ type InventoryRow = {
   type: "UNIT" | "LOT";
   serial_number: string;
   name_ja: string;
+  image_url?: string | null;
+  set_code?: string;
   condition_grade: string;
   location_code?: string;
   location_name: string;
   qty: number;
   status: string;
   acquisition_cost: number | null;
+  acquired_at?: string | null;
 };
 
 type TabKey = "all" | "in_stock" | "listed" | "sold";
@@ -53,10 +56,30 @@ function matchesTab(status: string, tab: TabKey): boolean {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ card?: string; serial?: string; tab?: string }>;
+  searchParams: Promise<{
+    card?: string;
+    serial?: string;
+    tab?: string;
+    q?: string;
+    set?: string;
+    condition?: string;
+    type?: string;
+    status?: string;
+    aging?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const tab: TabKey = (["all", "in_stock", "listed", "sold"].includes(sp.tab ?? "") ? sp.tab : "all") as TabKey;
+  const queryFilter = typeof sp.q === "string" ? sp.q.trim() : "";
+  const setFilter = typeof sp.set === "string" ? sp.set.trim() : "";
+  const conditionFilter = typeof sp.condition === "string" ? sp.condition.trim() : "";
+  const typeFilter = sp.type === "UNIT" || sp.type === "LOT" ? sp.type : "";
+  const statusFilter = typeof sp.status === "string" ? sp.status.trim() : "";
+  const agingFilter = sp.aging === "over90" || sp.aging === "over180" ? sp.aging : "";
+  const sort: InventorySortKey = normalizeSortKey(sp.sort);
+  const dir: InventorySortDir = normalizeSortDir(sp.dir);
 
   const supabase = await createClient();
   const isDemo = isDemoMode;
@@ -88,22 +111,48 @@ export default async function InventoryPage({
   if (serialFilter) {
     allRows = allRows.filter((r) => r.serial_number === serialFilter);
   }
+  allRows = allRows.map((row) => ({ ...row, set_code: deriveSetCode(row) }));
+
+  const filters: InventoryFilters = {
+    q: queryFilter,
+    set: setFilter,
+    condition: conditionFilter,
+    type: typeFilter,
+    status: statusFilter,
+    aging: agingFilter,
+  };
+  const filteredRows = filterInventoryRows(allRows, filters);
 
   // タブ別件数
   const counts: Record<TabKey, number> = {
-    all:      allRows.length,
-    in_stock: allRows.filter((r) => matchesTab(r.status, "in_stock")).length,
-    listed:   allRows.filter((r) => matchesTab(r.status, "listed")).length,
-    sold:     allRows.filter((r) => matchesTab(r.status, "sold")).length,
+    all:      filteredRows.length,
+    in_stock: filteredRows.filter((r) => matchesTab(r.status, "in_stock")).length,
+    listed:   filteredRows.filter((r) => matchesTab(r.status, "listed")).length,
+    sold:     filteredRows.filter((r) => matchesTab(r.status, "sold")).length,
   };
 
   // 表示行（タブフィルター）
-  const rows = allRows.filter((r) => matchesTab(r.status, tab));
+  const rows = sortInventoryRows(
+    filteredRows
+      .filter((r) => matchesTab(r.status, tab))
+      .map((r) => ({ ...r, aging_days: calculateAgingDays(r.acquired_at) })),
+    sort,
+    dir
+  );
   const hasSerialFilter = Boolean(serialFilter);
+  const { setOptions, conditionOptions, statusOptions } = buildInventoryFilterOptions(allRows);
 
   function tabHref(t: TabKey) {
     const params = new URLSearchParams();
     if (serialFilter) params.set("serial", serialFilter);
+    if (queryFilter) params.set("q", queryFilter);
+    if (setFilter) params.set("set", setFilter);
+    if (conditionFilter) params.set("condition", conditionFilter);
+    if (typeFilter) params.set("type", typeFilter);
+    if (statusFilter) params.set("status", statusFilter);
+    if (agingFilter) params.set("aging", agingFilter);
+    if (sort !== "name") params.set("sort", sort);
+    if (dir !== "asc") params.set("dir", dir);
     if (t !== "all") params.set("tab", t);
     const qs = params.toString();
     return `/inventory${qs ? `?${qs}` : ""}`;
@@ -120,6 +169,18 @@ export default async function InventoryPage({
           へ。
         </p>
       </div>
+
+      <InventoryFilterToolbar
+        initialQuery={queryFilter}
+        initialSet={setFilter}
+        initialCondition={conditionFilter}
+        initialType={typeFilter}
+        initialStatus={statusFilter}
+        initialAging={agingFilter}
+        setOptions={setOptions.map((v) => ({ value: v, label: v }))}
+        conditionOptions={conditionOptions.map((v) => ({ value: v, label: v }))}
+        statusOptions={statusOptions.map((v) => ({ value: v, label: v }))}
+      />
 
       {/* ── serial フィルターバナー ── */}
       {hasSerialFilter && (
@@ -140,7 +201,7 @@ export default async function InventoryPage({
       )}
 
       {/* ── ステータスタブ ── */}
-      {allRows.length > 0 && (
+      {filteredRows.length > 0 && (
         <div className="mt-5 flex flex-wrap gap-1 rounded-lg border bg-muted p-1">
           {(Object.keys(TAB_LABELS) as TabKey[]).map((t) => (
             <Link
@@ -182,50 +243,7 @@ export default async function InventoryPage({
           </Link>
         </div>
       ) : (
-        <Card className="mt-4 overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>カード識別子</TableHead>
-                <TableHead>カード名</TableHead>
-                <TableHead>コンディション</TableHead>
-                <TableHead className="text-right">数量</TableHead>
-                <TableHead>管理単位</TableHead>
-                <TableHead>保管場所</TableHead>
-                <TableHead>在庫状態</TableHead>
-                <TableHead className="text-right">取得原価</TableHead>
-                <TableHead>操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-mono text-xs">{row.serial_number}</TableCell>
-                  <TableCell className="font-medium">{row.name_ja}</TableCell>
-                  <TableCell>
-                    <span className="inline-flex min-w-[2rem] justify-center rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs font-semibold text-slate-700">
-                      {row.condition_grade}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{row.qty.toLocaleString()}</TableCell>
-                  <TableCell className="text-muted-foreground">{row.type === "UNIT" ? "1枚" : "ロット"}</TableCell>
-                  <TableCell className="font-mono text-xs">{row.location_code ?? "—"}</TableCell>
-                  <TableCell>
-                    <StatusBadge kind="stockStatus" value={row.status} />
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {row.acquisition_cost != null ? `¥${row.acquisition_cost.toLocaleString()}` : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Link href={`/inventory/${row.id}`} className="text-sm font-medium text-primary hover:underline">
-                      詳細
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+        <InventoryTable rows={rows} sort={sort} dir={dir} />
       )}
     </div>
   );
