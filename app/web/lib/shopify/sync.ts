@@ -164,12 +164,41 @@ export async function updateInventoryOnly(cardId: string): Promise<void> {
     await upsertProduct(cardId);
     return;
   }
-  const available = await computeAvailable(cardId);
-  await setInventory(client, BigInt(itemId), settings.locationId, available);
-  await pool.query(
-    `UPDATE shopify_products SET last_synced_at = now(), sync_status = 'SYNCED', updated_at = now() WHERE card_id = $1`,
-    [cardId]
-  );
+
+  // #27: 同一 cardId に対する updateInventoryOnly を直列化する。
+  // pg_advisory_xact_lock を 1 接続上で取り、computeAvailable → setInventory までを
+  // 同じ接続のトランザクション内で実行する。これで「読み取り → 送信」の間に
+  // 別の UPDATE_INVENTORY ジョブが値を上書きする競合は防げる。
+  // (webhooks の OUT 側はこのロックを取らないが、各 OUT は必ず UPDATE_INVENTORY を
+  //  enqueue する (#25) ため、結果整合で Shopify 側に最新値が反映される。)
+  const conn = await pool.connect();
+  try {
+    await conn.query("BEGIN");
+    await conn.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`shopify:update_inventory:${cardId}`]);
+
+    const availRes = await conn.query<{ available: string }>(
+      `SELECT
+         COALESCE((SELECT COUNT(*) FROM inventory_units WHERE card_id = $1 AND status = 'IN_STOCK'), 0)
+       + COALESCE((SELECT SUM(qty_on_hand) FROM inventory_lots WHERE card_id = $1 AND status = 'IN_STOCK'), 0)
+       - COALESCE((SELECT SUM(reserved_qty) FROM listings WHERE card_id = $1 AND status IN ('LISTED', 'RESERVED')), 0)
+         AS available`,
+      [cardId]
+    );
+    const available = Math.max(0, Number(availRes.rows[0]?.available ?? 0));
+
+    await setInventory(client, BigInt(itemId), settings.locationId, available);
+
+    await conn.query(
+      `UPDATE shopify_products SET last_synced_at = now(), sync_status = 'SYNCED', updated_at = now() WHERE card_id = $1`,
+      [cardId]
+    );
+    await conn.query("COMMIT");
+  } catch (e) {
+    await conn.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function unpublishProduct(cardId: string): Promise<void> {
