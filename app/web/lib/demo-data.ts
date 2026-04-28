@@ -45,6 +45,7 @@ export type DemoInventoryRow = {
   type: "UNIT" | "LOT";
   serial_number: string;
   name_ja: string;
+  image_url?: string | null;
   condition_grade: string;
   /** 座標 "tier-box-col" */
   location_code: string;
@@ -53,6 +54,7 @@ export type DemoInventoryRow = {
   qty: number;
   status: string;
   acquisition_cost: number | null;
+  acquired_at?: string;
 };
 
 export type DemoListingRow = {
@@ -217,72 +219,84 @@ const DEMO_INVENTORY: DemoInventoryRow[] = [
     type: "UNIT",
     serial_number: "SV2_050/078",
     name_ja: "カイリューex",
+    image_url: "https://images.pokemontcg.io/sv2/50.png",
     condition_grade: "S",
     location_code: "1-1-1",
     location_name: "1-1-1（棚1・箱1・列1）",
     qty: 1,
     status: "在庫",
     acquisition_cost: 3500,
+    acquired_at: "2026-03-28",
   },
   {
     id: "inv-u-1",
     type: "UNIT",
     serial_number: "SV8_100/106",
     name_ja: "リリバのみ",
+    image_url: "https://images.pokemontcg.io/sv8/100.png",
     condition_grade: "A",
     location_code: "1-2-1",
     location_name: "1-2-1（棚1・箱2・列1）",
     qty: 1,
     status: "在庫",
     acquisition_cost: 1200,
+    acquired_at: "2026-01-05",
   },
   {
     id: "inv-u-4",
     type: "UNIT",
     serial_number: "OBF_151/165",
     name_ja: "カードを探すイーブイ",
+    image_url: "https://images.pokemontcg.io/sv3pt5/151.png",
     condition_grade: "A",
     location_code: "1-2-1",
     location_name: "1-2-1（棚1・箱2・列1）",
     qty: 1,
     status: "在庫",
     acquisition_cost: 400,
+    acquired_at: "2025-12-10",
   },
   {
     id: "inv-u-5",
     type: "UNIT",
     serial_number: "SV4a_001/165",
     name_ja: "ピカチュウ",
+    image_url: "https://images.pokemontcg.io/sv4pt5/1.png",
     condition_grade: "B",
     location_code: "1-2-1",
     location_name: "1-2-1（棚1・箱2・列1）",
     qty: 1,
     status: "在庫",
     acquisition_cost: 150,
+    acquired_at: "2025-09-12",
   },
   {
     id: "inv-u-2",
     type: "UNIT",
     serial_number: "SV8_100/106",
     name_ja: "リリバのみ",
+    image_url: "https://images.pokemontcg.io/sv8/100.png",
     condition_grade: "B",
     location_code: "1-2-3",
     location_name: "1-2-3（棚1・箱2・列3）",
     qty: 1,
     status: "出品中",
     acquisition_cost: 800,
+    acquired_at: "2025-10-03",
   },
   {
     id: "inv-l-1",
     type: "LOT",
     serial_number: "SV4a_001/165",
     name_ja: "ピカチュウ",
+    image_url: "https://images.pokemontcg.io/sv4pt5/1.png",
     condition_grade: "C",
     location_code: "2-1-1",
     location_name: "2-1-1（棚2・箱1・列1）",
     qty: 15,
     status: "在庫",
     acquisition_cost: null,
+    acquired_at: "2025-07-19",
   },
 ];
 
