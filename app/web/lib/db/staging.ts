@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { getPool } from "./pool";
 
 export type StagingListRow = {
@@ -130,52 +131,84 @@ export async function createWebUploadStagingRows(opts: {
   reviewer_id?: string;
 }): Promise<{ batch_id: string; rows: ImportResultRow[] }> {
   const pool = getPool();
-  const batchId = `batch_${Date.now().toString(36)}`;
+  // batch_id / stg_id / drive_file_id は Date.now() ではなく UUID 生成。
+  // 同時複数アップロード or リトライで衝突しないようにする (#26B)。
+  const batchId = `batch_${randomUUID()}`;
   const rows: ImportResultRow[] = [];
 
-  for (let i = 0; i < opts.files.length; i += 1) {
-    const file = opts.files[i];
-    const stgId = `stg_upload_${Date.now().toString(36)}_${i}`;
-    const driveFileId = `web_upload_${Date.now().toString(36)}_${i}`;
+  // 各ファイルの解決を先に行う (DB I/O はシリアル必須ではないが、トランザクション境界の外で済ませる)
+  type Prepared = {
+    stgId: string;
+    driveFileId: string;
+    file: ImportFile;
+    serial: string | null;
+    set_code: string | null;
+    card_number_text: string | null;
+    duplicateCardId: string | null;
+    duplicateStatus: "NONE" | "CANDIDATE";
+  };
+  const prepared: Prepared[] = [];
+  for (const file of opts.files) {
     const serial = extractSerialFromName(file.file_name);
     const { set_code, card_number_text } = toSetAndCardText(serial);
     const duplicateCardId = await resolveDuplicateCardId(serial, set_code, card_number_text);
-    const duplicateStatus: "NONE" | "CANDIDATE" = duplicateCardId ? "CANDIDATE" : "NONE";
-
-    await pool.query(
-      `INSERT INTO ocr_staging (
-        stg_id, drive_file_id, file_name, image_url, ai_json, status, review_status,
-        serial_number, set_code, card_number_text, name_ja, qty,
-        batch_id, source, input_location_code, duplicate_status, duplicate_card_id, merge_decision
-      ) VALUES (
-        $1, $2, $3, $4, $5::jsonb, '登録待ち', 'PENDING',
-        $6, $7, $8, $9, 1,
-        $10, 'WEB_UPLOAD', $11, $12, $13, $14
-      )`,
-      [
-        stgId,
-        driveFileId,
-        file.file_name,
-        file.image_url,
-        JSON.stringify({ upload_source: "web", ocr_pending: true }),
-        serial,
-        set_code,
-        card_number_text,
-        normalizeFileBaseName(file.file_name),
-        batchId,
-        opts.input_location_code,
-        duplicateStatus,
-        duplicateCardId,
-        duplicateCardId ? "MERGE_EXISTING" : "CREATE_NEW",
-      ]
-    );
-
-    rows.push({
-      stg_id: stgId,
-      serial_number: serial,
-      duplicate_status: duplicateStatus,
-      duplicate_card_id: duplicateCardId,
+    prepared.push({
+      stgId: `stg_upload_${randomUUID()}`,
+      driveFileId: `web_upload_${randomUUID()}`,
+      file,
+      serial,
+      set_code,
+      card_number_text,
+      duplicateCardId,
+      duplicateStatus: duplicateCardId ? "CANDIDATE" : "NONE",
     });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const p of prepared) {
+      await client.query(
+        `INSERT INTO ocr_staging (
+          stg_id, drive_file_id, file_name, image_url, ai_json, status, review_status,
+          serial_number, set_code, card_number_text, name_ja, qty,
+          batch_id, source, input_location_code, duplicate_status, duplicate_card_id, merge_decision
+        ) VALUES (
+          $1, $2, $3, $4, $5::jsonb, '登録待ち', 'PENDING',
+          $6, $7, $8, $9, 1,
+          $10, 'WEB_UPLOAD', $11, $12, $13, $14
+        )`,
+        [
+          p.stgId,
+          p.driveFileId,
+          p.file.file_name,
+          p.file.image_url,
+          JSON.stringify({ upload_source: "web", ocr_pending: true }),
+          p.serial,
+          p.set_code,
+          p.card_number_text,
+          normalizeFileBaseName(p.file.file_name),
+          batchId,
+          opts.input_location_code,
+          p.duplicateStatus,
+          p.duplicateCardId,
+          p.duplicateCardId ? "MERGE_EXISTING" : "CREATE_NEW",
+        ]
+      );
+
+      rows.push({
+        stg_id: p.stgId,
+        serial_number: p.serial,
+        duplicate_status: p.duplicateStatus,
+        duplicate_card_id: p.duplicateCardId,
+      });
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
 
   return { batch_id: batchId, rows };
@@ -292,20 +325,23 @@ export async function approveStagingRow(
         [cardId, opts.condition_grade, Math.max(1, opts.initial_qty), resolvedStorageLocationId]
       );
     } else {
+      // #26A: ループ N 回の INSERT を 1 クエリにまとめ、部分失敗で半端な行が残らないようにする。
+      // (BEGIN..COMMIT 内なのでロールバックはされるが、単一クエリにすると失敗時のオール or
+      //  ナッシング保証が静的に明確になる。)
       const qty = Math.max(1, opts.initial_qty);
-      for (let i = 0; i < qty; i += 1) {
-        await client.query(
-          `INSERT INTO inventory_units (card_id, condition_grade, status, serial_number, memo, storage_location_id)
-           VALUES ($1, $2, 'IN_STOCK', $3, $4, $5)`,
-          [
-            cardId,
-            opts.condition_grade,
-            row.serial_number,
-            locationCode ? `location_code=${locationCode}` : null,
-            resolvedStorageLocationId,
-          ]
-        );
-      }
+      await client.query(
+        `INSERT INTO inventory_units (card_id, condition_grade, status, serial_number, memo, storage_location_id)
+         SELECT $1, $2, 'IN_STOCK', $3, $4, $5
+           FROM generate_series(1, $6::int)`,
+        [
+          cardId,
+          opts.condition_grade,
+          row.serial_number,
+          locationCode ? `location_code=${locationCode}` : null,
+          resolvedStorageLocationId,
+          qty,
+        ]
+      );
     }
 
     await client.query(

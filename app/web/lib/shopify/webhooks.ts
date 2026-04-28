@@ -80,6 +80,12 @@ async function dispatchTopic(topic: string, payload: Record<string, unknown>): P
     case "orders/paid":
       await handleOrder(topic, payload);
       return;
+    case "orders/cancelled":
+      await handleOrderCancelled(payload);
+      return;
+    case "refunds/create":
+      await handleRefundCreated(payload);
+      return;
     case "inventory_levels/update":
       // Shopify 側からの在庫変動通知。現状は監査ログに留める
       return;
@@ -107,89 +113,277 @@ export type ShopifyOrder = {
   }>;
 };
 
-export async function handleOrder(topic: string, payload: Record<string, unknown>): Promise<void> {
+export type ShopifyRefund = {
+  id: number;
+  order_id: number;
+  created_at?: string;
+  refund_line_items?: Array<{
+    id: number;
+    line_item_id: number;
+    quantity: number;
+  }>;
+};
+
+export async function handleOrder(_topic: string, payload: Record<string, unknown>): Promise<void> {
   const order = payload as ShopifyOrder;
   if (!order.id) throw new Error("order.id missing");
   const pool = getPool();
-
-  const orderRes = await pool.query<{ order_id: number }>(
-    `INSERT INTO orders (channel, external_order_id, order_status, currency, total_price, ordered_at, raw)
-     VALUES ('SHOPIFY', $1, $2, $3, $4, $5, $6::jsonb)
-     ON CONFLICT (channel, external_order_id) DO UPDATE SET
-       order_status = EXCLUDED.order_status,
-       total_price = EXCLUDED.total_price,
-       raw = EXCLUDED.raw,
-       updated_at = now()
-     RETURNING order_id`,
-    [
-      String(order.id),
-      order.financial_status ?? null,
-      order.currency ?? "JPY",
-      order.total_price ?? null,
-      order.created_at ?? null,
-      JSON.stringify(order),
-    ]
-  );
-  const orderId = orderRes.rows[0].order_id;
-
   const lines = order.line_items ?? [];
-  if (lines.length === 0) return;
 
-  for (const li of lines) {
-    let cardId: string | null = null;
-    if (li.variant_id) {
-      const { rows } = await pool.query<{ card_id: string }>(
-        `SELECT card_id FROM shopify_products WHERE shopify_variant_id = $1`,
-        [li.variant_id.toString()]
-      );
-      cardId = rows[0]?.card_id ?? null;
-    }
+  // batched variant_id → card_id lookup (#24B: N+1 解消)
+  const variantIds = Array.from(
+    new Set(lines.map((li) => li.variant_id).filter((v): v is number => typeof v === "number"))
+  );
+  const variantToCard = new Map<string, string>();
+  if (variantIds.length > 0) {
+    const { rows } = await pool.query<{ shopify_variant_id: string; card_id: string }>(
+      `SELECT shopify_variant_id, card_id
+         FROM shopify_products
+        WHERE shopify_variant_id = ANY($1::text[])`,
+      [variantIds.map((v) => v.toString())]
+    );
+    for (const r of rows) variantToCard.set(r.shopify_variant_id, r.card_id);
+  }
 
-    // 冪等: (order_id, shopify_line_item_id) UNIQUE で重複 INSERT を防ぐ
-    await pool.query(
-      `INSERT INTO order_lines (order_id, shopify_line_item_id, card_id, qty, unit_price, shopify_variant_id, raw)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-       ON CONFLICT (order_id, shopify_line_item_id) WHERE shopify_line_item_id IS NOT NULL
-       DO UPDATE SET
-         card_id = EXCLUDED.card_id,
-         qty = EXCLUDED.qty,
-         unit_price = EXCLUDED.unit_price,
-         shopify_variant_id = EXCLUDED.shopify_variant_id,
-         raw = EXCLUDED.raw`,
+  const touchedCardIds = new Set<string>();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const orderRes = await client.query<{ order_id: number }>(
+      `INSERT INTO orders (channel, external_order_id, order_status, currency, total_price, ordered_at, raw)
+       VALUES ('SHOPIFY', $1, $2, $3, $4, $5, $6::jsonb)
+       ON CONFLICT (channel, external_order_id) DO UPDATE SET
+         order_status = EXCLUDED.order_status,
+         total_price = EXCLUDED.total_price,
+         raw = EXCLUDED.raw,
+         updated_at = now()
+       RETURNING order_id`,
       [
-        orderId,
-        li.id,
-        cardId,
-        li.quantity,
-        li.price ?? null,
-        li.variant_id?.toString() ?? null,
-        JSON.stringify(li),
+        String(order.id),
+        order.financial_status ?? null,
+        order.currency ?? "JPY",
+        order.total_price ?? null,
+        order.created_at ?? null,
+        JSON.stringify(order),
       ]
     );
+    const orderId = orderRes.rows[0].order_id;
 
-    if (!cardId) continue;
+    for (const li of lines) {
+      const cardId = li.variant_id ? variantToCard.get(li.variant_id.toString()) ?? null : null;
 
-    // stock_movements: OUT
-    // 部分 UNIQUE INDEX (ref_kind='ORDER', ref_id, metadata->>'line_id') で
-    // どの topic（create/paid/updated）から来ても二重計上しない
-    const inserted = await pool.query<{ movement_id: string }>(
-      `INSERT INTO stock_movements
-         (target_type, target_id, card_id, qty_delta, movement_type, ref_kind, ref_id, notes, metadata)
-       SELECT 'LOT', inventory_lot_id, $1, -$2, 'OUT', 'ORDER', $3,
-              'Shopify order ' || $4, $5::jsonb
-         FROM inventory_lots
-        WHERE card_id = $1 AND status = 'IN_STOCK'
-        ORDER BY created_at ASC
-        LIMIT 1
-       ON CONFLICT (ref_kind, ref_id, ((metadata->>'line_id'))) WHERE ref_kind = 'ORDER' AND metadata ? 'line_id'
-       DO NOTHING
-       RETURNING movement_id`,
-      [cardId, li.quantity, String(order.id), order.name ?? String(order.id), JSON.stringify({ line_id: li.id })]
-    );
+      // 冪等: (order_id, shopify_line_item_id) UNIQUE で重複 INSERT を防ぐ
+      await client.query(
+        `INSERT INTO order_lines (order_id, shopify_line_item_id, card_id, qty, unit_price, shopify_variant_id, raw)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         ON CONFLICT (order_id, shopify_line_item_id) WHERE shopify_line_item_id IS NOT NULL
+         DO UPDATE SET
+           card_id = EXCLUDED.card_id,
+           qty = EXCLUDED.qty,
+           unit_price = EXCLUDED.unit_price,
+           shopify_variant_id = EXCLUDED.shopify_variant_id,
+           raw = EXCLUDED.raw`,
+        [
+          orderId,
+          li.id,
+          cardId,
+          li.quantity,
+          li.price ?? null,
+          li.variant_id?.toString() ?? null,
+          JSON.stringify(li),
+        ]
+      );
 
-    // 新規 OUT が記録されたときだけ Shopify 在庫数を再同期
-    if (inserted.rowCount && inserted.rowCount > 0) {
-      await enqueueJob("UPDATE_INVENTORY", cardId, { reason: "order_consumed", order_id: order.id });
+      if (!cardId) continue;
+
+      // #24A: SELECT ... FOR UPDATE SKIP LOCKED で在庫ロットを取り、
+      //       同時注文で同一ロットを二重引当しないようにする。
+      // INSERT ... SELECT 内では FOR UPDATE が書けないため CTE に分離。
+      // ON CONFLICT で同一 (ORDER, order_id, line_id) は二重計上を防ぐ。
+      await client.query(
+        `WITH picked AS (
+           SELECT inventory_lot_id
+             FROM inventory_lots
+            WHERE card_id = $1 AND status = 'IN_STOCK'
+            ORDER BY created_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+         )
+         INSERT INTO stock_movements
+           (target_type, target_id, card_id, qty_delta, movement_type, ref_kind, ref_id, notes, metadata)
+         SELECT 'LOT', inventory_lot_id, $1, -$2, 'OUT', 'ORDER', $3,
+                'Shopify order ' || $4, $5::jsonb
+           FROM picked
+         ON CONFLICT (ref_kind, ref_id, ((metadata->>'line_id')))
+           WHERE ref_kind = 'ORDER' AND metadata ? 'line_id'
+         DO NOTHING`,
+        [cardId, li.quantity, String(order.id), order.name ?? String(order.id), JSON.stringify({ line_id: li.id })]
+      );
+
+      // #25: insert 成否に関わらず、line_item に紐づく card は必ず再同期対象とする。
+      // (二重 webhook で 2 回目が ON CONFLICT になっても UPDATE_INVENTORY が漏れないようにする。
+      //  UPDATE_INVENTORY 自体はべき等なので多少の無駄同期は許容する。)
+      touchedCardIds.add(cardId);
     }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  // ジョブ enqueue は COMMIT 後 (失敗時に孤児ジョブが残らないように)
+  for (const cardId of touchedCardIds) {
+    await enqueueJob("UPDATE_INVENTORY", cardId, { reason: "order_consumed", order_id: order.id });
+  }
+}
+
+export async function handleOrderCancelled(payload: Record<string, unknown>): Promise<void> {
+  const order = payload as ShopifyOrder;
+  if (!order.id) throw new Error("order.id missing");
+  await reverseOrderMovements({
+    refId: String(order.id),
+    refKind: "CANCEL",
+    metadataExtra: {},
+    notesPrefix: `Shopify order cancelled ${order.name ?? order.id}`,
+  });
+}
+
+export async function handleRefundCreated(payload: Record<string, unknown>): Promise<void> {
+  const refund = payload as ShopifyRefund;
+  if (!refund.id || !refund.order_id) throw new Error("refund.id/order_id missing");
+  const items = refund.refund_line_items ?? [];
+  if (items.length === 0) return;
+
+  const pool = getPool();
+  const touchedCardIds = new Set<string>();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    for (const ri of items) {
+      // 元の OUT 行から card_id / lot を取得
+      const { rows } = await client.query<{
+        card_id: string;
+        target_type: string;
+        target_id: string;
+      }>(
+        `SELECT card_id, target_type, target_id
+           FROM stock_movements
+          WHERE ref_kind = 'ORDER'
+            AND ref_id = $1
+            AND metadata->>'line_id' = $2
+          ORDER BY moved_at ASC
+          LIMIT 1`,
+        [String(refund.order_id), String(ri.line_item_id)]
+      );
+      const src = rows[0];
+      if (!src) continue;
+
+      await client.query(
+        `INSERT INTO stock_movements
+           (target_type, target_id, card_id, qty_delta, movement_type, ref_kind, ref_id, notes, metadata)
+         VALUES ($1, $2, $3, $4, 'IN', 'REFUND', $5, $6, $7::jsonb)
+         ON CONFLICT (ref_kind, ref_id, ((metadata->>'line_id')), ((metadata->>'refund_id')))
+           WHERE ref_kind = 'REFUND' AND metadata ? 'line_id' AND metadata ? 'refund_id'
+         DO NOTHING`,
+        [
+          src.target_type,
+          src.target_id,
+          src.card_id,
+          ri.quantity,
+          String(refund.order_id),
+          `Shopify refund ${refund.id}`,
+          JSON.stringify({ line_id: ri.line_item_id, refund_id: refund.id }),
+        ]
+      );
+      touchedCardIds.add(src.card_id);
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  for (const cardId of touchedCardIds) {
+    await enqueueJob("UPDATE_INVENTORY", cardId, {
+      reason: "refund_restored",
+      order_id: refund.order_id,
+      refund_id: refund.id,
+    });
+  }
+}
+
+// 共通: 元の OUT 行を反転する IN 行を全 line に対して INSERT (キャンセル用)
+async function reverseOrderMovements(args: {
+  refId: string;
+  refKind: "CANCEL";
+  metadataExtra: Record<string, unknown>;
+  notesPrefix: string;
+}): Promise<void> {
+  const pool = getPool();
+  const touchedCardIds = new Set<string>();
+
+  // 元 OUT 行を取得
+  const { rows: outs } = await pool.query<{
+    card_id: string;
+    target_type: string;
+    target_id: string;
+    qty_delta: number;
+    line_id: string;
+  }>(
+    `SELECT card_id, target_type, target_id, qty_delta, metadata->>'line_id' AS line_id
+       FROM stock_movements
+      WHERE ref_kind = 'ORDER'
+        AND ref_id = $1
+        AND metadata ? 'line_id'`,
+    [args.refId]
+  );
+  if (outs.length === 0) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const o of outs) {
+      const meta = { ...args.metadataExtra, line_id: o.line_id };
+      await client.query(
+        `INSERT INTO stock_movements
+           (target_type, target_id, card_id, qty_delta, movement_type, ref_kind, ref_id, notes, metadata)
+         VALUES ($1, $2, $3, $4, 'IN', $5, $6, $7, $8::jsonb)
+         ON CONFLICT (ref_kind, ref_id, ((metadata->>'line_id')))
+           WHERE ref_kind = 'CANCEL' AND metadata ? 'line_id'
+         DO NOTHING`,
+        [
+          o.target_type,
+          o.target_id,
+          o.card_id,
+          Math.abs(o.qty_delta),
+          args.refKind,
+          args.refId,
+          args.notesPrefix,
+          JSON.stringify(meta),
+        ]
+      );
+      touchedCardIds.add(o.card_id);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  for (const cardId of touchedCardIds) {
+    await enqueueJob("UPDATE_INVENTORY", cardId, {
+      reason: "order_cancelled",
+      order_id: args.refId,
+    });
   }
 }
